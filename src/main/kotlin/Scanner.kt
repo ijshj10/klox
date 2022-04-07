@@ -67,7 +67,7 @@ class Scanner(private val source: String) {
         else -> {
             if(c.isAlpha()) identifier()
             else
-                error(line, "Unexpected character ${source[current-1]}")
+                Lox.error(line, "Unexpected character ${source[current-1]}")
         }
     }
 
@@ -77,7 +77,7 @@ class Scanner(private val source: String) {
             advance()
         }
 
-        if (isAtEnd()) error(line, "Unterminated string.")
+        if (isAtEnd()) Lox.error(line, "Unterminated string.")
         advance()
 
         val value = source.substring(start + 1, current - 1)
@@ -90,7 +90,8 @@ class Scanner(private val source: String) {
             advance()
             while (peek() in '0'..'9') advance()
         }
-        val value = source.substring(start, current).toIntOrNull() ?: error(line, "Invalid number.")
+        val value = source.substring(start, current).toDoubleOrNull() ?:
+            Lox.error(line, "Invalid number.")
         addToken(TokenType.Number, value)
     }
 

@@ -4,41 +4,60 @@ fun main(args: Array<String>) {
     if(args.size > 1) {
         println("Usage: klox [script]")
     } else if(args.size == 1) {
-        runFile(args[0])
+        Lox.runFile(args[0])
     } else {
-        runPrompt()
+        Lox.runPrompt()
     }
 }
 
-fun runFile(fileName: String) {
-    val bytes = File(fileName).readBytes()
-    run(String(bytes))
-}
-
-fun runPrompt() {
-    while (true) {
-        print("> ")
-        val line = readLine()
-        run(line ?: break)
-        hadError = false
+object Lox {
+    fun runFile(fileName: String) {
+        val bytes = File(fileName).readBytes()
+        val interpreter = Interpreter()
+        run(String(bytes), interpreter)
     }
-}
 
-var hadError = false
-
-fun run(source: String) {
-    val scanner = Scanner(source)
-    val tokens = scanner.scanTokens()
-    for (token in tokens) {
-        println(token)
+    fun runPrompt() {
+        val interpreter = Interpreter()
+        while (true) {
+            print("> ")
+            val line = readLine()
+            run(line ?: break, interpreter)
+            hadError = false
+        }
     }
-}
 
-fun error(line: Int, message: String) {
-    report(line, "", message)
-}
+    private var hadRuntimeError = false
+    private var hadError = false
 
-fun report(line: Int, where: String, message: String) {
-    println("[line $line] Error $where: $message")
-    hadError = true
+    private fun run(source: String, interpreter: Interpreter) {
+        val scanner = Scanner(source)
+        val tokens = scanner.scanTokens()
+        val parser = Parser(tokens)
+        val expression = parser.parse()
+        interpreter.interpret(expression)
+    }
+
+    fun error(line: Int, message: String) {
+        report(line, "", message)
+    }
+
+    fun error(token: Token, message: String) {
+        if (token.type == TokenType.EOF) {
+            report(token.line, " at end ", message)
+        } else {
+            report(token.line, " at '${token.lexeme}'", message)
+        }
+
+    }
+
+    private fun report(line: Int, where: String, message: String) {
+        println("[line $line] Error $where: $message")
+        hadError = true
+    }
+
+    fun runtimeError(error: RuntimeError) {
+        println("[line ${error.token.line}] ${error.message}")
+        hadRuntimeError = true
+    }
 }
