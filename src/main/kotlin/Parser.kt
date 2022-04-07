@@ -17,6 +17,9 @@ class Parser(private val tokens: List<Token>) {
             if (match(TokenType.Var)) {
                 return varDeclaration()
             }
+            if (match(TokenType.Fun)) {
+                return function("function")
+            }
             return statement()
         } catch (_: ParseError) {
             synchronize()
@@ -35,11 +38,33 @@ class Parser(private val tokens: List<Token>) {
         return Stmt.Var(name, initializer)
     }
 
+    private fun function(kind: String): Stmt {
+        val name = consume(TokenType.Identifier, "Expect $kind name.")
+        consume(TokenType.LParen, "Expect '(' after $kind name.")
+        val parameters = arrayListOf<Token>()
+        if(!check(TokenType.RParen)) {
+            do {
+                if (parameters.size >= 255) {
+                    error(peek(), "Can't have more than 255 parameters.")
+                }
+                parameters.add(consume(TokenType.Identifier, "Expect parameter name."))
+            } while(match(TokenType.Comma))
+        }
+        consume(TokenType.RParen, "Expect ')' after parameters.")
+
+        consume(TokenType.LBrace, "Expect '{' before $kind body.")
+        val body = block()
+        return Stmt.Function(name, parameters, body)
+    }
+
+
     private fun statement() =
-        if(match(TokenType.Print)) {
+        if (match(TokenType.Print)) {
             printStatement()
+        } else if(match(TokenType.Return)){
+            returnStatement()
         } else if (match(TokenType.LBrace)) {
-            Stmt.Block(blockStatement())
+            Stmt.Block(block())
         } else if(match(TokenType.If)) {
             ifStatement()
         } else if(match(TokenType.While)){
@@ -54,6 +79,16 @@ class Parser(private val tokens: List<Token>) {
         val expr = expression()
         consume(TokenType.Semicolon, "Expect ';' after expression.")
         return Stmt.Expression(expr)
+    }
+
+    private fun returnStatement(): Stmt {
+        val keyword = previous()
+        var value: Expr? = null
+        if(!check(TokenType.Semicolon)) {
+            value = expression()
+        }
+        consume(TokenType.Semicolon, "Expect ';' after return statement.")
+        return Stmt.Return(keyword, value)
     }
 
     private fun forStatement(): Stmt {
@@ -95,7 +130,7 @@ class Parser(private val tokens: List<Token>) {
         return statement
     }
 
-    private fun blockStatement(): List<Stmt> {
+    private fun block(): List<Stmt> {
         val statements = ArrayList<Stmt>()
         while(!check(TokenType.RBrace) && !isAtEnd()) {
             val stmt = declaration()
@@ -199,7 +234,28 @@ class Parser(private val tokens: List<Token>) {
             val right = unary()
             return Expr.Unary(operator, right)
         }
-        return primary()
+        return call()
+    }
+
+    private fun finishCall(callee: Expr): Expr {
+        val arguments = arrayListOf<Expr>()
+        if(!check(TokenType.RParen)) {
+            do {
+                if(arguments.size > 255)
+                    error(peek(), "Can't have more than 255 arguments.")
+                arguments.add(expression())
+            }   while (match(TokenType.Comma))
+        }
+        val paren = consume(TokenType.RParen, "Expect ')' after arguments")
+        return Expr.Call(callee, paren, arguments)
+    }
+
+    private fun call(): Expr {
+        var expr = primary()
+        while(match(TokenType.LParen)) {
+            expr = finishCall(expr)
+        }
+        return expr
     }
 
     private fun primary(): Expr {
@@ -235,10 +291,11 @@ class Parser(private val tokens: List<Token>) {
         }
         return false
     }
-    private fun consume(type: TokenType, message: String) {
+    private fun consume(type: TokenType, message: String): Token {
         if(!match(type)) {
             throw error(peek(), message)
         }
+        return previous()
     }
 
     private class ParseError: RuntimeException()
@@ -287,7 +344,12 @@ sealed interface Stmt {
     data class While(val condition: Expr, val body: Stmt): Stmt {
         override fun <R> accept(visitor: Visitor<R>): R = visitor.visitWhileStmt(this)
     }
-
+    data class Function(val name: Token, val params: List<Token>, val body: List<Stmt>): Stmt {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitFunctionStmt(this)
+    }
+    data class Return(val keyword: Token, val value: Expr?): Stmt {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitReturnStmt(this)
+    }
 
     interface Visitor<R> {
         fun visitExpressionStmt(stmt: Expression): R
@@ -296,6 +358,8 @@ sealed interface Stmt {
         fun visitBlockStmt(stmt: Block): R
         fun visitIfStmt(stmt: If): R
         fun visitWhileStmt(stmt: While): R
+        fun visitFunctionStmt(stmt: Function): R
+        fun visitReturnStmt(stmt: Return): R
     }
 }
 
@@ -322,6 +386,10 @@ sealed interface Expr {
     data class Logical(val l: Expr, val op: Token, val r: Expr): Expr {
         override fun <R> accept(visitor: Visitor<R>): R = visitor.visitLogicalExpr(this)
     }
+    class Call(val callee: Expr, val paren: Token, val arguments: List<Expr>) : Expr {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitCallExpr(this)
+    }
+
 
     interface Visitor<R> {
         fun visitBinaryExpr(expr: Binary): R
@@ -331,5 +399,7 @@ sealed interface Expr {
         fun visitVariableExpr(expr: Variable): R
         fun visitAssignExpr(expr: Assign): R
         fun visitLogicalExpr(expr: Logical): R
+        fun visitCallExpr(expr: Call): R
     }
+
 }

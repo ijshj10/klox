@@ -14,7 +14,7 @@ class Scanner(private val source: String) {
         "if" to TokenType.If,
         "nil" to TokenType.Nil,
         "or" to TokenType.Or,
-        "print" to TokenType.Print,
+        //"print" to TokenType.Print,
         "return" to TokenType.Return,
         "super" to TokenType.Super,
         "this" to TokenType.This,

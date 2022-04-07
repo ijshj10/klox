@@ -2,7 +2,26 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
-    private var env = Environment()
+    internal val globals = Environment()
+    private var env = globals
+
+    init {
+        globals.define("print", object: LoxCallable {
+            override val arity = 1
+            override fun invoke(interpreter: Interpreter, arguments: List<Any?>): Any? {
+                println(interpreter.stringify(arguments[0]))
+                return null
+            }
+            override fun toString() = "<native fn>"
+        })
+        globals.define("clock", object: LoxCallable {
+            override val arity = 0
+            override fun invoke(interpreter: Interpreter, arguments: List<Any?>): Any {
+                return System.currentTimeMillis().toDouble() / 1000.0
+            }
+            override fun toString() = "<native fn>"
+        })
+    }
 
     fun interpret(statements: List<Stmt>) {
         try {
@@ -18,7 +37,7 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         stmt.accept(this)
     }
 
-    private fun executeBlock(statements: List<Stmt>, env: Environment) {
+    internal fun executeBlock(statements: List<Stmt>, env: Environment) {
         val previous = this.env
         try {
             this.env = env
@@ -138,6 +157,22 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         return env.get(expr.name)
     }
 
+    override fun visitCallExpr(expr: Expr.Call): Any? {
+        val callee = evaluate(expr.callee)
+        val arguments = arrayListOf<Any?>()
+        for(argument in expr.arguments) {
+            arguments.add(evaluate(argument))
+        }
+        if(callee !is LoxCallable) {
+            throw RuntimeError(expr.paren, "'${stringify(callee)}' is not callable.")
+        }
+        if(arguments.size != callee.arity) {
+            throw RuntimeError(expr.paren,
+                "Expected ${callee.arity} arguments but got ${arguments.size} arguments.")
+        }
+        return callee(this, arguments)
+    }
+
     private fun evaluate(expr: Expr) = expr.accept(this)
 
     /*
@@ -157,7 +192,7 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         return a == b
     }
 
-    private fun stringify(value: Any?): String {
+    fun stringify(value: Any?): String {
         return when(value) {
             is Boolean -> if(value) "true" else "false"
             null -> "nil"
@@ -179,6 +214,18 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
     override fun visitPrintStmt(stmt: Stmt.Print) {
         val value = evaluate(stmt.expr)
         println(stringify(value))
+    }
+
+    override fun visitFunctionStmt(stmt: Stmt.Function) {
+        globals.define(stmt.name.lexeme, LoxFunction(stmt, env))
+    }
+
+    override fun visitReturnStmt(stmt: Stmt.Return) {
+        var value: Any? = null
+        if(stmt.value != null) {
+            value = evaluate(stmt.value)
+        }
+        throw Return(value)
     }
 
     override fun visitWhileStmt(stmt: Stmt.While) {
