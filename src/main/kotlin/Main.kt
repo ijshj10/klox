@@ -35,6 +35,9 @@ object Lox {
         val tokens = scanner.scanTokens()
         val parser = Parser(tokens)
         val expression = parser.parse()
+        val resolver = Resolver(interpreter)
+        resolver.resolve(expression)
+        if(hadError) return
         interpreter.interpret(expression)
     }
 
@@ -48,7 +51,6 @@ object Lox {
         } else {
             report(token.line, " at '${token.lexeme}'", message)
         }
-
     }
 
     private fun report(line: Int, where: String, message: String) {

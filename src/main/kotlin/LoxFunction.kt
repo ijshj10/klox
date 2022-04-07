@@ -11,7 +11,6 @@ class LoxFunction(private val declaration: Stmt.Function, private val closure: E
         }
         return null
     }
-
     override val arity = declaration.params.size
     override fun toString() = "<fn ${declaration.name.lexeme}>"
 }

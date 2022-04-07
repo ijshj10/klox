@@ -2,8 +2,9 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
 class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
-    internal val globals = Environment()
+    private val globals = Environment()
     private var env = globals
+    private var locals = HashMap<Expr, Int>()
 
     init {
         globals.define("print", object: LoxCallable {
@@ -117,7 +118,12 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
 
     override fun visitAssignExpr(expr: Expr.Assign): Any? {
         val value = evaluate(expr.value)
-        env.assign(expr.name, value)
+        val distance = locals[expr]
+        if (distance != null) {
+            env.assignAt(distance, expr.name, value)
+        } else {
+            globals.assign(expr.name, value)
+        }
         return value
     }
 
@@ -153,8 +159,16 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         throw RuntimeError(operator, "Operands must be numbers.")
     }
 
-    override fun visitVariableExpr(expr: Expr.Variable): Any? {
-        return env.get(expr.name)
+    override fun visitVariableExpr(expr: Expr.Variable) = lookUpVariable(expr.name, expr)
+
+
+    private fun lookUpVariable(name: Token, expr: Expr): Any? {
+        val distance = locals[expr]
+        return if(distance != null) {
+            env.getAt(distance, name)
+        } else {
+            globals.get(name)
+        }
     }
 
     override fun visitCallExpr(expr: Expr.Call): Any? {
@@ -252,5 +266,9 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
                         evaluate(stmt.initializer)
                         else null
         env.define(stmt.name.lexeme, value)
+    }
+
+    fun resolve(expr: Expr, depth: Int) {
+        locals[expr] = depth
     }
 }
