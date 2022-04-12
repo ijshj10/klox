@@ -1,5 +1,5 @@
 class Environment(val enclosing: Environment? = null) {
-    private val values = HashMap<String, Any?>()
+    val values = HashMap<String, Any?>()
 
 
     fun define(name: String, value: Any?) {
@@ -28,6 +28,7 @@ class Environment(val enclosing: Environment? = null) {
     }
 
     fun getAt(distance: Int, name: Token): Any? = ancestor(distance).get(name)
+    fun getAt(distance: Int, lexeme: String): Any? = ancestor(distance).values[lexeme]
 
     fun assignAt(distance: Int, name: Token, value: Any?) {
         ancestor(distance).values[name.lexeme] = value

@@ -20,6 +20,9 @@ class Parser(private val tokens: List<Token>) {
             if (match(TokenType.Fun)) {
                 return function("function")
             }
+            if (match(TokenType.Class)) {
+                return classDeclaration()
+            }
             return statement()
         } catch (_: ParseError) {
             synchronize()
@@ -38,7 +41,26 @@ class Parser(private val tokens: List<Token>) {
         return Stmt.Var(name, initializer)
     }
 
-    private fun function(kind: String): Stmt {
+    private fun classDeclaration(): Stmt {
+        val name = consume(TokenType.Identifier, "Expect class name.")
+        var superclass: Expr.Variable? = null
+        if(match(TokenType.Less)) {
+            consume(TokenType.Identifier, "Expect superclass name.")
+            superclass = Expr.Variable(previous())
+        }
+        consume(TokenType.LBrace, "Expect '{' before class body.")
+
+        val methods = mutableListOf<Stmt.Function>()
+        while(!check(TokenType.RBrace) && !isAtEnd()) {
+            methods.add(function("method"))
+        }
+
+        consume(TokenType.RBrace, "Expect '}' after class body.")
+
+        return Stmt.Class(name, methods, superclass)
+    }
+
+    private fun function(kind: String): Stmt.Function {
         val name = consume(TokenType.Identifier, "Expect $kind name.")
         consume(TokenType.LParen, "Expect '(' after $kind name.")
         val parameters = arrayListOf<Token>()
@@ -187,10 +209,16 @@ class Parser(private val tokens: List<Token>) {
         if(match(TokenType.Eq)) {
             val equals = previous()
             val value = assignment()
-            if(expr is Expr.Variable) {
-                expr = Expr.Assign(expr.name, value)
-            } else {
-                error(equals, "Invalid assignment target.")
+            when (expr) {
+                is Expr.Variable -> {
+                    expr = Expr.Assign(expr.name, value)
+                }
+                is Expr.Get -> {
+                    expr = Expr.Set(expr.obj, expr.name, value)
+                }
+                else -> {
+                    error(equals, "Invalid assignment target.")
+                }
             }
         }
         return expr
@@ -252,8 +280,15 @@ class Parser(private val tokens: List<Token>) {
 
     private fun call(): Expr {
         var expr = primary()
-        while(match(TokenType.LParen)) {
-            expr = finishCall(expr)
+        while(true) {
+            expr = if(match(TokenType.LParen)) {
+                finishCall(expr)
+            } else if(match(TokenType.Dot)) {
+                val name = consume(TokenType.Identifier, "Expect property name after '.'")
+                Expr.Get(expr, name)
+            } else {
+                break
+            }
         }
         return expr
     }
@@ -262,6 +297,13 @@ class Parser(private val tokens: List<Token>) {
         if(match(TokenType.False)) return Expr.Literal(false)
         if(match(TokenType.True)) return Expr.Literal(true)
         if(match(TokenType.Nil)) return Expr.Literal(null)
+        if(match(TokenType.This)) return Expr.This(previous())
+        if(match(TokenType.Super)) {
+            val keyword = previous()
+            consume(TokenType.Dot, "Expect '.' after 'super'.")
+            val method = consume(TokenType.Identifier, "Expect superclass method name.")
+            return Expr.Super(keyword, method)
+        }
         if(match(TokenType.Number, TokenType.String)) {
             return Expr.Literal(previous().literal!!)
         }
@@ -350,6 +392,9 @@ sealed interface Stmt {
     data class Return(val keyword: Token, val value: Expr?): Stmt {
         override fun <R> accept(visitor: Visitor<R>): R = visitor.visitReturnStmt(this)
     }
+    data class Class(val name: Token, val methods: List<Function>, val superclass: Expr.Variable? = null): Stmt {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitClassStmt(this)
+    }
 
     interface Visitor<R> {
         fun visitExpressionStmt(stmt: Expression): R
@@ -360,6 +405,7 @@ sealed interface Stmt {
         fun visitWhileStmt(stmt: While): R
         fun visitFunctionStmt(stmt: Function): R
         fun visitReturnStmt(stmt: Return): R
+        fun visitClassStmt(stmt: Class): R
     }
 }
 
@@ -386,10 +432,24 @@ sealed interface Expr {
     data class Logical(val l: Expr, val op: Token, val r: Expr): Expr {
         override fun <R> accept(visitor: Visitor<R>): R = visitor.visitLogicalExpr(this)
     }
+    data class This(val keyword: Token): Expr {
+        override fun <R> accept(visitor: Visitor<R>) = visitor.visitThisExpr(this)
+    }
     class Call(val callee: Expr, val paren: Token, val arguments: List<Expr>) : Expr {
         override fun <R> accept(visitor: Visitor<R>): R = visitor.visitCallExpr(this)
     }
 
+    class Get(val obj: Expr, val name: Token) : Expr {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitGetExpr(this)
+    }
+
+    class Set(val obj: Expr, val name: Token, val value: Expr) : Expr {
+        override fun <R> accept(visitor: Visitor<R>): R = visitor.visitSetExpr(this)
+    }
+
+    class Super(val keyword: Token, val method: Token) : Expr {
+        override fun <R> accept(visitor: Visitor<R>) = visitor.visitSuperExpr(this)
+    }
 
     interface Visitor<R> {
         fun visitBinaryExpr(expr: Binary): R
@@ -400,6 +460,13 @@ sealed interface Expr {
         fun visitAssignExpr(expr: Assign): R
         fun visitLogicalExpr(expr: Logical): R
         fun visitCallExpr(expr: Call): R
+        fun visitGetExpr(expr: Get): R
+        fun visitSetExpr(expr: Set): R
+        fun visitThisExpr(expr: This): R
+        fun visitSuperExpr(expr: Super): R
     }
+
+
+
 
 }

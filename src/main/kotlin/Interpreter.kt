@@ -187,6 +187,36 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         return callee(this, arguments)
     }
 
+    override fun visitSuperExpr(expr: Expr.Super): Any? {
+        val disatnce = locals[expr]!!
+        val superclass = env.getAt(disatnce, "super") as LoxClass
+        val obj = env.getAt(disatnce-1, "this") as LoxInstance
+
+        val method = superclass.findMethod(expr.method) ?:
+            throw RuntimeError(expr.method, "Undefined property '${expr.method.lexeme}'.")
+        return method.bind(obj)
+    }
+
+    override fun visitGetExpr(expr: Expr.Get): Any? {
+        val obj = evaluate(expr.obj)
+        if(obj is LoxInstance) {
+            return obj.get(expr.name)
+        }
+        throw RuntimeError(expr.name, "Only instances have properties.")
+    }
+
+    override fun visitThisExpr(expr: Expr.This): Any? = lookUpVariable(expr.keyword, expr)
+
+    override fun visitSetExpr(expr: Expr.Set): Any? {
+        val obj = evaluate(expr.obj)
+        if(obj !is LoxInstance) {
+            throw RuntimeError(expr.name, "Only instance have fields.")
+        }
+        val value = evaluate(expr.value)
+        obj.set(expr.name, value)
+        return value
+    }
+
     private fun evaluate(expr: Expr) = expr.accept(this)
 
     /*
@@ -221,6 +251,31 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         }
     }
 
+    override fun visitClassStmt(stmt: Stmt.Class) {
+        var superclass: LoxClass? = null
+
+        if(stmt.superclass != null) {
+            superclass = evaluate(stmt.superclass) as? LoxClass ?:
+                throw RuntimeError(stmt.superclass.name, "Superclass must be a class.")
+        }
+        env.define(stmt.name.lexeme, null)
+
+        if(stmt.superclass != null) {
+            env = Environment(env)
+            env.define("super", superclass)
+        }
+        val methods = HashMap<String, LoxFunction>()
+        for(method in stmt.methods) {
+            val function = LoxFunction(method, env, method.name.lexeme == "init")
+            methods[method.name.lexeme] = function
+        }
+        val klass = LoxClass(stmt.name.lexeme, methods, superclass)
+        if(superclass != null) {
+            env = env.enclosing!!
+        }
+        env.assign(stmt.name, klass)
+    }
+
     override fun visitExpressionStmt(stmt: Stmt.Expression) {
         evaluate(stmt.expr)
     }
@@ -231,7 +286,7 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
     }
 
     override fun visitFunctionStmt(stmt: Stmt.Function) {
-        globals.define(stmt.name.lexeme, LoxFunction(stmt, env))
+        globals.define(stmt.name.lexeme, LoxFunction(stmt, env, false))
     }
 
     override fun visitReturnStmt(stmt: Stmt.Return) {
@@ -248,9 +303,10 @@ class Interpreter: Expr.Visitor<Any?>, Stmt.Visitor<Unit> {
         }
     }
 
+
     override fun visitIfStmt(stmt: Stmt.If) {
-        val condtion = evaluate(stmt.condition)
-        if(isTruthy(condtion)) {
+        val condition = evaluate(stmt.condition)
+        if(isTruthy(condition)) {
             execute(stmt.ifBranch)
         } else if(stmt.elseBranch != null) {
             execute(stmt.elseBranch)

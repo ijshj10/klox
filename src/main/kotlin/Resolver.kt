@@ -1,6 +1,7 @@
 class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.Visitor<Unit> {
     private val scopes = mutableListOf<HashMap<String, Boolean>>()
     private var currentFunction = FunctionType.None
+    private var currentClass = ClassType.Class
 
     private fun resolve(expr: Expr) = expr.accept(this)
     private fun resolve(stmt: Stmt) = stmt.accept(this)
@@ -38,9 +39,9 @@ class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.V
         }
     }
 
-    private fun resolveFunction(function: Stmt.Function) {
+    private fun resolveFunction(function: Stmt.Function, type: FunctionType) {
         val enclosingFunction = currentFunction
-        currentFunction = FunctionType.Function
+        currentFunction = type
         beginScope()
         for (param in function.params) {
             declare(param)
@@ -60,6 +61,48 @@ class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.V
             resolve(stmt.initializer)
         }
         define(stmt.name)
+    }
+
+    override fun visitClassStmt(stmt: Stmt.Class) {
+        val enclosingClass = currentClass
+        declare(stmt.name)
+        define(stmt.name)
+        currentClass = ClassType.Class
+        if(stmt.superclass != null) {
+            currentClass = ClassType.Subclass
+            beginScope()
+            scopes.last()["super"] = true
+            if(stmt.superclass.name.lexeme == stmt.name.lexeme) {
+                Lox.error(stmt.superclass.name, "A class can't inherit from itself.")
+            }
+            resolve(stmt.superclass)
+        }
+        beginScope()
+
+        scopes.last()["this"] =  true
+
+        for (method in stmt.methods) {
+            var declaration = FunctionType.Method
+            if(method.name.lexeme == "init")
+                declaration = FunctionType.Initializer
+            resolveFunction(method, declaration)
+        }
+
+        endScope()
+        if(stmt.superclass != null)
+            endScope()
+        currentClass = enclosingClass
+    }
+
+    override fun visitSuperExpr(expr: Expr.Super) {
+        if (currentClass == ClassType.None) {
+            Lox.error(expr.keyword,
+                "Can't use 'super' outside of a class.")
+        } else if (currentClass != ClassType.Subclass) {
+            Lox.error(expr.keyword,
+                "Can't use 'super' in a class with no superclass.")
+        }
+        resolveLocal(expr, expr.keyword)
     }
 
     override fun visitBlockStmt(stmt: Stmt.Block) {
@@ -84,15 +127,21 @@ class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.V
         declare(stmt.name)
         define(stmt.name)
 
-        resolveFunction(stmt)
+        resolveFunction(stmt, FunctionType.Function)
     }
 
     override fun visitReturnStmt(stmt: Stmt.Return) {
         if(currentFunction == FunctionType.None) {
             Lox.error(stmt.keyword, "Can't return from top-level code.")
         }
-        if(stmt.value != null)
+        if(stmt.value != null) {
+            if(currentFunction == FunctionType.Initializer) {
+                Lox.error(stmt.keyword, "Can't return a value from an initializer.")
+            }
             resolve(stmt.value)
+        }
+
+
     }
 
     override fun visitBinaryExpr(expr: Expr.Binary) {
@@ -105,6 +154,13 @@ class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.V
     }
 
     override fun visitLiteralExpr(expr: Expr.Literal) {}
+
+    override fun visitThisExpr(expr: Expr.This) {
+        if(currentClass == ClassType.None) {
+            Lox.error(expr.keyword, "Can't use 'this' outside of a class.")
+        }
+        resolveLocal(expr, expr.keyword)
+    }
 
     override fun visitUnaryExpr(expr: Expr.Unary) {
         resolve(expr.right)
@@ -133,8 +189,21 @@ class Resolver(private val interpreter: Interpreter): Expr.Visitor<Unit>, Stmt.V
             resolve(argument)
         }
     }
+
+    override fun visitGetExpr(expr: Expr.Get) {
+        resolve(expr.obj)
+    }
+
+    override fun visitSetExpr(expr: Expr.Set) {
+        resolve(expr.value)
+        resolve(expr.obj)
+    }
 }
 
 enum class FunctionType {
-    None, Function
+    None, Function, Method, Initializer
+}
+
+enum class ClassType {
+    None, Class, Subclass
 }
